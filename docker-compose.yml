@@ -1,20 +1,28 @@
 services:
   open-xiaoai-bridge:
-    image: ghcr.io/coderzc/open-xiaoai-bridge:latest
+    # 官方镜像，如果在国内服务器拉取慢，可切换为南京大学加速镜像: ghcr.nju.edu.cn/coderzc/open-xiaoai-bridge:latest
+    image: ghcr.nju.edu.cn/coderzc/open-xiaoai-bridge:latest
     restart: unless-stopped
     ports:
       - "4399:4399"
       - "9092:9092"
     environment:
-      - LOGLEVEL=INFO # 日志级别（DEBUG, INFO, WARNING, ERROR, CRITICAL）
-      - API_SERVER_ENABLE=1 # 启用 HTTP API 服务（可选）
-      - API_SERVER_HOST=0.0.0.0 # HTTP API 服务监听地址（默认监听 127.0.0.1）
-      - OPENCLAW_ENABLE=1       # 启用 OpenClaw（兼容旧值 OPENCLAW_ENABLED）
-      # - QWENPAW_ENABLE=1       # 启用 QwenPaw（可选）
-      # - XIAOZHI_ENABLE=1       # 启用小智 AI（可选）
+      - LOGLEVEL=DEBUG # 日志级别（DEBUG, INFO, WARNING, ERROR, CRITICAL）
+      - API_SERVER_ENABLE=1 # 启用 HTTP API 服务
+      - API_SERVER_HOST=0.0.0.0 # HTTP API 服务监听地址
+      - OPENAI_ENABLE=1 # 启用 OpenAI / 兼容大模型（支持多模型Profile路由）
+      - XIAOZHI_ENABLE=0 # 启用小智 AI（未部署小智服务端时设为0避免重试刷屏）
+      - OPENCLAW_ENABLE=0 # 启用 OpenClaw（按需开启）
+      - QWENPAW_ENABLE=0 # 启用 QwenPaw（按需开启）
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - VOLCANO_TTS_APP_ID=${VOLCANO_TTS_APP_ID:-}
+      - VOLCANO_TTS_ACCESS_KEY=${VOLCANO_TTS_ACCESS_KEY:-}
+      - VOLCANO_TTS_API_KEY=${VOLCANO_TTS_API_KEY:-}
     volumes:
       - ./config.py:/app/config.py
-      - ./openclaw:/app/openclaw
+      - ./core:/app/core
       - ./models:/app/core/models
+      - ./openclaw:/app/openclaw
     stdin_open: true
     tty: true      
