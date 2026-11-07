@@ -158,14 +158,16 @@ class ConfigManager:
         """
         更新 config.py 文件中的特定配置项
         """
-        write_file(
-            "config.py",
-            re.sub(
-                r'"{}"\s*:\s*"[^"]*"'.format(path),
-                f'"{path}": "{value}"',
-                read_file("config.py"),
-            ),
-        )
+        try:
+            content = read_file("config.py")
+            pattern = r'"{}"\s*:\s*"[^"]*"'.format(path)
+            if not re.search(pattern, content):
+                return
+            new_content = re.sub(pattern, f'"{path}": "{value}"', content)
+            if new_content != content:
+                write_file("config.py", new_content)
+        except Exception:
+            pass
 
     @classmethod
     def instance(cls):

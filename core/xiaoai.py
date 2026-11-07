@@ -30,6 +30,7 @@ class XiaoAI:
     conversation = XiaoAIConversationController()
     _input_gain_enabled = False
     _input_gain = 1.0
+    _last_audio_time = time.monotonic()
     _async_loop_ready = threading.Event()
     _external_wakeup_keywords: set[str] = set()
     _suppressed_dialog_ids: set[str] = set()
@@ -109,6 +110,7 @@ class XiaoAI:
 
     @classmethod
     def on_input_data(cls, data: bytes):
+        cls._last_audio_time = time.monotonic()
         audio_array = np.frombuffer(data, dtype=np.int16)
         if cls._input_gain_enabled and audio_array.size > 0:
             boosted = audio_array.astype(np.float32) * cls._input_gain
@@ -270,11 +272,36 @@ class XiaoAI:
             logger.debug(f"[XiaoAI] ❓ 未处理的事件类型: {event_type} | 完整数据: {event_json}")
 
     @classmethod
+    async def _connection_watchdog(cls):
+        """Active connection watchdog.
+
+        Monitors incoming audio stream. When audio stops for > 8s, probes the speaker
+        with a lightweight shell ping. If the speaker has rebooted or dropped, this RPC
+        write flushes the half-open socket, triggering TCP RST and allowing the new connection
+        to be accepted immediately.
+        """
+        await asyncio.sleep(10)
+        while True:
+            await asyncio.sleep(5)
+            silence_duration = time.monotonic() - cls._last_audio_time
+            if silence_duration > 8:
+                try:
+                    await cls.speaker.run_shell("true", timeout=2000)
+                except Exception as exc:
+                    logger.debug(
+                        f"[XiaoAI] Connection watchdog probe error: {exc}"
+                    )
+
+    @classmethod
     def __init_background_event_loop(cls):
         def run_event_loop():
             cls.async_loop = asyncio.new_event_loop()
             asyncio.set_event_loop(cls.async_loop)
             cls._async_loop_ready.set()
+            asyncio.run_coroutine_threadsafe(
+                cls._connection_watchdog(),
+                cls.async_loop,
+            )
             cls.async_loop.run_forever()
 
         thread = threading.Thread(target=run_event_loop, daemon=True)
