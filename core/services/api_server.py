@@ -39,6 +39,7 @@ class APIServer:
         self.app.router.add_post("/api/wakeup", self.handle_wakeup)
         self.app.router.add_post("/api/interrupt", self.handle_stop)
         self.app.router.add_get("/api/health", self.handle_health)
+        self.app.router.add_post("/api/chat", self.handle_chat)
         # TTS endpoints
         self.app.router.add_post("/api/tts/doubao", self.handle_tts_doubao)
         self.app.router.add_get("/api/tts/doubao_voices", self.handle_tts_voices)
@@ -386,6 +387,59 @@ class APIServer:
                 "speaker_ready": get_speaker() is not None
             }
         })
+
+    async def handle_chat(self, request: web.Request) -> web.Response:
+        """
+        POST /api/chat
+        Send a text query to the LLM backend and return the response.
+
+        Request body:
+            {
+                "text": "你好",                  # required
+                "profile": "gemini",             # optional model profile (e.g. gemini, deepseek, doubao)
+                "play": false                    # optional, whether to play reply via TTS (default false)
+            }
+        """
+        try:
+            data = await request.json()
+            text = data.get("text")
+            if not text:
+                return web.json_response(
+                    {"success": False, "error": "Missing required field: text"},
+                    status=400,
+                )
+
+            profile = data.get("profile")
+            play = data.get("play", False)
+
+            from core.openai import OpenAIManager
+            reply = await OpenAIManager.send(text, wait_response=True, profile=profile)
+
+            if reply is None:
+                error_msg = getattr(OpenAIManager, "last_error", "No response or timeout")
+                return web.json_response(
+                    {"success": False, "error": f"LLM returned empty response: {error_msg}"},
+                    status=500,
+                )
+
+            current_profile = OpenAIManager.get_profile() or "default"
+
+            if play:
+                speaker = get_speaker()
+                if speaker:
+                    asyncio.create_task(speaker.play(text=reply))
+
+            return web.json_response({
+                "success": True,
+                "profile": current_profile,
+                "reply": reply,
+            })
+        except Exception as e:
+            logger.error(f"[APIServer] Error in chat: {e}")
+            return web.json_response(
+                {"success": False, "error": str(e)},
+                status=500,
+            )
 
     async def handle_tts_doubao(self, request: web.Request) -> web.Response:
         """
