@@ -49,6 +49,10 @@ class OpenAIManager:
     _response_tts_speakers: dict[str, str | None] = {}
     last_error: str | None = None
 
+    _profiles: dict[str, dict[str, Any]] = {}
+    _current_profile: str | None = None
+    _default_config: dict[str, Any] = {}
+
     @classmethod
     def initialize_from_config(cls, enabled: bool | None = None):
         logger.info("[OpenAI] Initializing from config...")
@@ -77,43 +81,96 @@ class OpenAIManager:
                 else False
             )
 
-        cls._base_url = str(config.get("base_url", "http://127.0.0.1:8000/v1")).rstrip("/")
-        cls._api_key = str(config.get("api_key", "") or "")
-        cls._model = str(config.get("model", "gpt-4o-mini"))
-        cls._session_key = str(config.get("session_key", "agent:default:open-xiaoai-bridge"))
-        cls._session_header = str(config.get("session_header", "X-Hermes-Session-Key") or "").strip()
-        cls._system_prompt = str(config.get("system_prompt", "") or "")
-        cls._timeout = int(config.get("response_timeout", 120))
-        cls._history_max_messages = max(0, int(config.get("history_max_messages", 20)))
-        cls._temperature = cls._optional_float(config.get("temperature"))
-        cls._max_tokens = cls._optional_int(config.get("max_tokens"))
-        cls._extra_body = config.get("extra_body", {})
-        if not isinstance(cls._extra_body, dict):
-            cls._extra_body = {}
-        configured_provider = config.get("tts_provider")
-        cls._tts_provider = (
-            str(configured_provider).strip().lower()
-            if configured_provider
-            else None
-        )
-        cls._tts_speaker = config.get("tts_speaker", None)
-        cls._session_tts_speakers = (
-            {
-                str(key): str(value)
-                for key, value in config.get("session_tts_speakers", {}).items()
-                if key and value
-            }
-            if isinstance(config.get("session_tts_speakers", {}), dict)
-            else {}
-        )
-        cls._tts_speed = float(config.get("tts_speed", 1.0))
-        cls._rule_prompt = str(config.get("rule_prompt", "") or "")
-        cls._rule_prompt_for_skill = str(config.get("rule_prompt_for_skill", "") or "")
+        cls._default_config = {
+            "base_url": str(config.get("base_url", "http://127.0.0.1:8000/v1")).rstrip("/"),
+            "api_key": str(config.get("api_key", "") or ""),
+            "model": str(config.get("model", "gpt-4o-mini")),
+            "session_key": str(config.get("session_key", "agent:default:open-xiaoai-bridge")),
+            "session_header": str(config.get("session_header", "X-Hermes-Session-Key") or "").strip(),
+            "system_prompt": str(config.get("system_prompt", "") or ""),
+            "timeout": int(config.get("response_timeout", 120)),
+            "history_max_messages": max(0, int(config.get("history_max_messages", 20))),
+            "temperature": cls._optional_float(config.get("temperature")),
+            "max_tokens": cls._optional_int(config.get("max_tokens")),
+            "extra_body": config.get("extra_body", {}) if isinstance(config.get("extra_body"), dict) else {},
+            "tts_provider": (
+                str(config.get("tts_provider")).strip().lower()
+                if config.get("tts_provider")
+                else None
+            ),
+            "tts_speaker": config.get("tts_speaker", None),
+            "session_tts_speakers": (
+                {
+                    str(key): str(value)
+                    for key, value in config.get("session_tts_speakers", {}).items()
+                    if key and value
+                }
+                if isinstance(config.get("session_tts_speakers", {}), dict)
+                else {}
+            ),
+            "tts_speed": float(config.get("tts_speed", 1.0)),
+            "rule_prompt": str(config.get("rule_prompt", "") or ""),
+            "rule_prompt_for_skill": str(config.get("rule_prompt_for_skill", "") or ""),
+        }
+        cls._profiles = config.get("profiles", {})
+        if not isinstance(cls._profiles, dict):
+            cls._profiles = {}
+
+        cls._apply_profile(cls._current_profile)
 
         if cls._enabled:
             logger.info(
-                f"[OpenAI] Enabled, base_url={cls._base_url}, model={cls._model}"
+                f"[OpenAI] Enabled, base_url={cls._base_url}, model={cls._model}, profiles={list(cls._profiles.keys())}"
             )
+
+    @classmethod
+    def _apply_profile(cls, profile_name: str | None):
+        cfg = dict(cls._default_config)
+        if profile_name and profile_name in cls._profiles:
+            profile_cfg = cls._profiles[profile_name]
+            if isinstance(profile_cfg, dict):
+                # Ensure session_key is uniquely scoped per profile if not specified
+                if "session_key" not in profile_cfg:
+                    cfg["session_key"] = f"agent:{profile_name}:open-xiaoai-bridge"
+                cfg.update(profile_cfg)
+
+        cls._base_url = str(cfg["base_url"]).rstrip("/")
+        cls._api_key = str(cfg["api_key"] or "")
+        cls._model = str(cfg["model"])
+        cls._session_key = str(cfg["session_key"])
+        cls._session_header = str(cfg.get("session_header") or "").strip()
+        cls._system_prompt = str(cfg.get("system_prompt") or "")
+        cls._timeout = int(cfg.get("timeout", 120))
+        cls._history_max_messages = max(0, int(cfg.get("history_max_messages", 20)))
+        cls._temperature = cls._optional_float(cfg.get("temperature"))
+        cls._max_tokens = cls._optional_int(cfg.get("max_tokens"))
+        cls._extra_body = cfg.get("extra_body", {}) if isinstance(cfg.get("extra_body"), dict) else {}
+        cls._tts_provider = cfg.get("tts_provider")
+        cls._tts_speaker = cfg.get("tts_speaker")
+        cls._session_tts_speakers = cfg.get("session_tts_speakers", {})
+        cls._tts_speed = float(cfg.get("tts_speed", 1.0))
+        cls._rule_prompt = str(cfg.get("rule_prompt") or "")
+        cls._rule_prompt_for_skill = str(cfg.get("rule_prompt_for_skill") or "")
+
+    @classmethod
+    def set_profile(cls, profile_name: str | None):
+        """Switch active model profile (e.g., 'deepseek', 'doubao', 'gpt')."""
+        cls._current_profile = profile_name
+        cls._apply_profile(profile_name)
+        logger.info(
+            f"[OpenAI] Active profile set to: {profile_name!r} "
+            f"(model={cls._model!r}, base_url={cls._base_url!r}, session_key={cls._session_key!r})"
+        )
+
+    @classmethod
+    def get_profile(cls) -> str | None:
+        """Get the name of the currently active profile."""
+        return cls._current_profile
+
+    @classmethod
+    def reset_profile(cls):
+        """Reset to default profile."""
+        cls.set_profile(None)
 
     @classmethod
     def _optional_float(cls, value) -> float | None:
@@ -178,7 +235,9 @@ class OpenAIManager:
         return TTSRouter.resolve_provider(cls._tts_provider, tts_speaker)
 
     @classmethod
-    async def send(cls, text: str, wait_response: bool = False) -> str | None:
+    async def send(cls, text: str, wait_response: bool = False, profile: str | None = None) -> str | None:
+        if profile is not None:
+            cls.set_profile(profile)
         run_id = await cls._send_and_track(text)
         if run_id is None:
             return None
@@ -191,7 +250,9 @@ class OpenAIManager:
             cls._response_tts_speakers.pop(run_id, None)
 
     @classmethod
-    async def send_and_play_reply(cls, text: str, wait_response: bool = False) -> str | None:
+    async def send_and_play_reply(cls, text: str, wait_response: bool = False, profile: str | None = None) -> str | None:
+        if profile is not None:
+            cls.set_profile(profile)
         run_id = await cls._send_and_track(text)
         if run_id is None:
             return None
@@ -276,7 +337,8 @@ class OpenAIManager:
         headers = cls._headers()
 
         async with aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=cls._timeout)
+            timeout=aiohttp.ClientTimeout(total=cls._timeout),
+            trust_env=True,
         ) as session:
             async with session.post(
                 cls._chat_completions_url(),

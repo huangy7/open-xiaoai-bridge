@@ -141,6 +141,7 @@ class WakeupSessionManager:
         )
         OpenClawManager._session_key = default_session_key
         from core.openai import OpenAIManager
+        OpenAIManager.reset_profile()
         default_openai_session_key = self.config.get_app_config(
             "openai", {}
         ).get("session_key", "agent:default:open-xiaoai-bridge")
@@ -167,7 +168,10 @@ class WakeupSessionManager:
 
         if should_wakeup == "openclaw":
             await self._start_openclaw_conversation()
-        elif should_wakeup == "openai":
+        elif should_wakeup and (should_wakeup == "openai" or should_wakeup.startswith("openai:")):
+            if ":" in should_wakeup:
+                profile_name = should_wakeup.split(":", 1)[1]
+                OpenAIManager.set_profile(profile_name)
             await self._start_openai_conversation()
         elif should_wakeup == "qwenpaw":
             await self._start_qwenpaw_conversation()

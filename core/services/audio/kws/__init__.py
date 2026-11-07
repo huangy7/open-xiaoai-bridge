@@ -25,6 +25,7 @@ class _KWS:
         self.vad_silence_frames = 0  # 静音帧计数
         self.vad_min_silence_frames = 15  # 静默超过该帧数则判定为说完
         self.vad_start_time = time.time()
+        self.vad_buffer = bytearray()
         
         # 设置帧大小为 512 以兼容 Silero VAD
         self.frame_size = 512
@@ -109,14 +110,17 @@ class _KWS:
                 if not self.vad_active:
                     self.vad_active = True
                     self.vad_start_time = time.time()
+                    self.vad_buffer.clear()
                     logger.debug("检测到语音，开始 KWS 检测", module="KWS")
                 
                 self.vad_silence_frames = 0
+                self.vad_buffer.extend(frames)
                 
                 # 只在有语音时才进行 KWS 检测
                 result = SherpaOnnx.kws(frames)
                 if result:
                     logger.wakeup(result, module="KWS")
+                    self.vad_buffer.clear()
                     self.on_message(result)
                     # 唤醒后重置状态
                     self.vad_active = False
@@ -130,9 +134,11 @@ class _KWS:
                     # 在激活状态下，允许一定的静音间隙
                     if self.vad_silence_frames <= self.vad_min_silence_frames:
                         # 继续将音频送入 KWS，允许短暂的静音
+                        self.vad_buffer.extend(frames)
                         result = SherpaOnnx.kws(frames)
                         if result:
                             logger.wakeup(result, module="KWS")
+                            self.vad_buffer.clear()
                             self.on_message(result)
                             self.vad_active = False
                             self.vad_silence_frames = 0
@@ -147,12 +153,79 @@ class _KWS:
                             ),
                             module="KWS",
                         )
+                        audio_data = bytes(self.vad_buffer)
+                        self.vad_buffer.clear()
                         self.vad_active = False
                         self.vad_silence_frames = 0
                         # Reset Sherpa stream to discard partial recognition state,
                         # preventing leftover audio from the previous utterance
                         # from combining with the next one.
                         SherpaOnnx.reset()
+
+                        # ASR 回退匹配（针对英文单词如 gemini 在中文声学模型漏检）
+                        if len(audio_data) >= 16000 * 2 * 0.35:
+                            threading.Thread(
+                                target=self._check_asr_wakeup,
+                                args=(audio_data,),
+                                daemon=True,
+                            ).start()
+
+    def _check_asr_wakeup(self, audio_data: bytes):
+        try:
+            from core.services.audio.asr.service import ASRService
+            asr_text = ASRService.asr(audio_data)
+            if not asr_text:
+                return
+            cleaned = asr_text.strip().lower()
+            for ch in "，。！？,.!?、~ ":
+                cleaned = cleaned.replace(ch, "")
+
+            # 匹配 小艺 / 肥鲸 (DeepSeek)
+            xiaoyi_kw = [
+                "小艺", "小易", "小意", "小翼", "晓艺", "效力", "小义", "效益",
+                "肥鲸", "肥金", "肥京", "黑金", "深度", "深搜", "deepseek", "deepseeg", "deep", "迪普", "地铺"
+            ]
+            if any(k in cleaned for k in xiaoyi_kw):
+                logger.wakeup(f"小艺 (ASR命中: {asr_text})", module="KWS")
+                self.on_message("小艺")
+                return
+
+            # 匹配 美国豆包 (Gemini)
+            mgdb_kw = [
+                "美国豆包", "美豆", "gemini", "gmini", "jamin", "jeemy", "jemini", "gミ",
+                "双子", "双子星", "杰米", "吉米", "格米", "加米", "天命来", "下面呢", "じゃめ"
+            ]
+            if any(k in cleaned for k in mgdb_kw):
+                logger.wakeup(f"美国豆包 (ASR命中: {asr_text})", module="KWS")
+                self.on_message("美国豆包")
+                return
+
+            if "豆包" in cleaned:
+                logger.wakeup(f"豆包 (ASR命中: {asr_text})", module="KWS")
+                self.on_message("豆包豆包")
+                return
+
+            if any(k in cleaned for k in ["小黑", "gpt"]):
+                logger.wakeup(f"你好小黑 (ASR命中: {asr_text})", module="KWS")
+                self.on_message("你好小黑")
+                return
+
+            if "小智" in cleaned:
+                logger.wakeup(f"你好小智 (ASR命中: {asr_text})", module="KWS")
+                self.on_message("你好小智")
+                return
+
+            if "龙虾" in cleaned:
+                logger.wakeup(f"你好龙虾 (ASR命中: {asr_text})", module="KWS")
+                self.on_message("你好龙虾")
+                return
+
+            if "小爪" in cleaned:
+                logger.wakeup(f"你好小爪 (ASR命中: {asr_text})", module="KWS")
+                self.on_message("你好小爪")
+                return
+        except Exception as exc:
+            logger.debug(f"[KWS] ASR fallback wakeup error: {exc}")
 
     def on_message(self, text: str):
         loop = get_app().loop if get_app() else get_xiaoai().async_loop

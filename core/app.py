@@ -450,13 +450,22 @@ class MainApp:
         """
         OpenClawManager.set_session_key(session_key)
 
-    async def send_to_openai(self, text: str, wait_response: bool = False) -> str | None:
+    async def send_to_openai(
+        self,
+        text: str,
+        wait_response: bool = False,
+        profile: str | None = None,
+    ) -> str | None:
         """Send message to the OpenAI-compatible service."""
         try:
             full_text = text
             if OpenAIManager._rule_prompt_for_skill:
                 full_text = text + "\n" + OpenAIManager._rule_prompt_for_skill
-            return await OpenAIManager.send(full_text, wait_response=wait_response)
+            return await OpenAIManager.send(
+                full_text,
+                wait_response=wait_response,
+                profile=profile,
+            )
         except Exception as e:
             logger.error(f"[MainApp] 发送消息到 OpenAI 兼容服务失败: {type(e).__name__}: {e}")
             return None
@@ -465,6 +474,7 @@ class MainApp:
         self,
         text: str,
         wait_response: bool = False,
+        profile: str | None = None,
     ) -> str | None:
         """Send message to the OpenAI-compatible service and play the reply."""
         try:
@@ -474,6 +484,7 @@ class MainApp:
             return await OpenAIManager.send_and_play_reply(
                 full_text,
                 wait_response=wait_response,
+                profile=profile,
             )
         except Exception as e:
             logger.error(f"[MainApp] 发送消息到 OpenAI 兼容服务失败: {type(e).__name__}: {e}")
@@ -482,6 +493,14 @@ class MainApp:
     def set_openai_session_key(self, session_key: str):
         """Override the OpenAI-compatible service session key at runtime."""
         OpenAIManager.set_session_key(session_key)
+
+    def set_openai_profile(self, profile_name: str | None):
+        """Switch active OpenAI-compatible model profile (e.g. 'deepseek', 'doubao', 'gpt')."""
+        OpenAIManager.set_profile(profile_name)
+
+    def get_openai_profile(self) -> str | None:
+        """Get currently active OpenAI-compatible model profile name."""
+        return OpenAIManager.get_profile()
 
     async def send_to_qwenpaw(self, text: str, wait_response: bool = False) -> str | None:
         """Send message to QwenPaw."""

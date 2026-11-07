@@ -40,7 +40,8 @@ class _SherpaOnnx:
             result = self.keyword_spotter.get_result(self.stream)
             if result:
                 self.keyword_spotter.reset_stream(self.stream)
-                return result.lower()
+                cleaned = result.replace("▁", "").strip().lower()
+                return cleaned
 
 
 SherpaOnnx = _SherpaOnnx()

@@ -72,7 +72,7 @@ class SpeakerManager:
             command = (
                 f"miplayer -f '{url}'"
                 if url
-                else f"/usr/sbin/tts_play.sh '{text.replace("'", "'\\''") or '你好'}'"
+                else f"/usr/sbin/tts_play.sh '{text.replace("'", "'\\''") or '你好'}'; exit 0"
             )
             res = await self.run_shell(command, timeout=timeout)
             return res.exit_code == 0
